@@ -1,11 +1,8 @@
 use anyhow::{anyhow, Result};
 use qb::Qb;
 use serde::Deserialize;
-use sonarr::{Release, Season, Series, SeriesId};
-use std::{
-    collections::HashSet,
-    time::{Duration, Instant},
-};
+use sonarr::{Release, Season, Series};
+use std::time::Duration;
 use tokio::time::interval;
 use tracing::instrument;
 
@@ -47,37 +44,22 @@ async fn main() {
     let qb = Qb::new(config.qb_api_url.parse().unwrap());
 
     let mut interval = interval(config.check_interval);
-    let mut skip_series = HashSet::new();
-    let mut skip_start = Instant::now();
-    let max_skip_time = Duration::from_secs(60 * 60 * 12);
-    
+
     loop {
         interval.tick().await;
-        let _ = download_releases(&sonarr, &qb, &mut skip_series).await;
-        if skip_start.elapsed() > max_skip_time {
-            skip_start = Instant::now();
-            skip_series.clear();
-        }
+        let _ = download_releases(&sonarr, &qb).await;
     }
 }
 
 #[instrument(skip_all, err)]
-async fn download_releases(
-    sonarr: &Sonarr,
-    qb: &Qb,
-    skip_series: &mut HashSet<SeriesId>,
-) -> Result<()> {
+async fn download_releases(sonarr: &Sonarr, qb: &Qb) -> Result<()> {
     let series = sonarr.series().await?;
     for series in series.into_iter() {
-        if skip_series.contains(&series.id) {
-            continue;
-        }
         for season in series.seasons.iter() {
             if season.needs_update() {
                 if let Ok(Some(res)) = find_release(sonarr, &series, season).await {
                     qb.upload_torrent(res.download_url, "tv-sonarr".into())
                         .await?;
-                    skip_series.insert(series.id);
                 }
             }
         }
