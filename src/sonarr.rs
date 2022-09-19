@@ -1,4 +1,4 @@
-use std::convert::TryInto;
+use std::{convert::TryInto, time::SystemTime};
 
 use anyhow::{anyhow, Result};
 use derive_more::Display;
@@ -122,6 +122,8 @@ pub struct Episode {
 pub struct Release {
     pub guid: String,
     pub download_url: String,
+    #[serde(with = "humantime_serde")]
+    pub publish_date: SystemTime,
 }
 
 #[derive(Deserialize, Debug)]
@@ -156,7 +158,6 @@ impl HistoryEvent {
 #[serde(rename_all = "camelCase")]
 pub struct HistoryData {
     pub guid: Option<String>,
-    pub published_date: Option<String>,
 }
 
 #[derive(Debug)]

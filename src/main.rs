@@ -2,9 +2,9 @@ use anyhow::{anyhow, Result};
 use qb::Qb;
 use serde::Deserialize;
 use sonarr::{Release, Season, Series};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use tokio::time::interval;
-use tracing::instrument;
+use tracing::{info, instrument};
 
 use crate::sonarr::Sonarr;
 
@@ -18,6 +18,8 @@ struct Config {
     qb_api_url: String,
     #[serde(with = "humantime_serde")]
     check_interval: Duration,
+    #[serde(with = "humantime_serde")]
+    new_release_duration: Duration,
 }
 
 impl Config {
@@ -47,20 +49,22 @@ async fn main() {
 
     loop {
         interval.tick().await;
-        let _ = download_releases(&sonarr, &qb).await;
+        let _ = download_releases(&sonarr, &qb, config.new_release_duration).await;
     }
 }
 
 #[instrument(skip_all, err)]
-async fn download_releases(sonarr: &Sonarr, qb: &Qb) -> Result<()> {
+async fn download_releases(sonarr: &Sonarr, qb: &Qb, new_release_duration: Duration) -> Result<()> {
     let series = sonarr.series().await?;
     for series in series.into_iter() {
-        for season in series.seasons.iter() {
-            if season.needs_update() {
-                if let Ok(Some(res)) = find_release(sonarr, &series, season).await {
-                    qb.upload_torrent(res.download_url, "tv-sonarr".into())
-                        .await?;
-                }
+        for season in series.seasons.iter().filter(|s| s.needs_update()) {
+            if let Ok(Some(release)) = find_release(sonarr, &series, season)
+                .await
+                .map(|r| r.filter(|r| r.publish_date + new_release_duration > SystemTime::now()))
+            {
+                info!(?release, "downloading release");
+                qb.upload_torrent(release.download_url, "tv-sonarr".into())
+                    .await?;
             }
         }
     }
